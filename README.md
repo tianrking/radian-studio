@@ -1,53 +1,54 @@
 <div align="center">
+  <img src="src-tauri/icons/icon.png" width="96" height="96" alt="Radian Studio icon" />
 
-<img src="src-tauri/icons/icon.png" width="96" alt="Radian Studio icon" />
+  <h1>Radian Studio</h1>
 
-# Radian Studio
+  <p><strong>A desktop viewfinder and control station for Radian cameras.</strong></p>
+  <p>Preview live video, tune the camera, and capture photos and clips over your local network.</p>
 
-**A desktop viewfinder and control station for Radian cameras.**
+  <a href="https://github.com/tianrking/radian-studio/actions/workflows/build.yml"><img src="https://github.com/tianrking/radian-studio/actions/workflows/build.yml/badge.svg" alt="Desktop build status" /></a>
 
-Connect directly over your local network, monitor an H.264 feed, adjust camera settings, and capture photos or clips alongside on-device AI results.
+  <p>
+    <a href="#connect-a-camera">Connect a camera</a> ·
+    <a href="#build-from-source">Build from source</a> ·
+    <a href="#try-without-a-camera">Try the simulator</a> ·
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
 
-[![Desktop builds](https://github.com/tianrking/radian-studio/actions/workflows/build.yml/badge.svg)](https://github.com/tianrking/radian-studio/actions/workflows/build.yml)
-
-[Connect a camera](#connect-a-camera) · [Build from source](#build-from-source) · [Try the simulator](#try-without-a-camera) · [简体中文](README.zh-CN.md)
-
+  <img src="docs/studio-preview.webp" width="100%" alt="Radian Studio on macOS showing a simulator test pattern, AI detection, a luminance histogram, and camera controls" />
+  <p><sub>Radian Studio on macOS with the built-in camera simulator.</sub></p>
 </div>
-
-## What you can do
-
-| Capability | Desktop workflow |
-| --- | --- |
-| **Connect** | Enter an IPv4 address or discover cameras by broadcast on the Mac or PC's active IPv4 subnets, including Ethernet link-local networks. Studio falls back to a /24 unicast scan around an entered address if broadcast finds no camera. |
-| **Frame a shot** | Preview over HTTP or UDP with automatic reconnect, zoom and pan, flips, a framing grid, a luminance histogram, and an optional horizon guide. |
-| **Tune the camera** | Adjust bitrate, GOP, white balance, exposure, shutter and ISO limits, image enhancements, and scene presets. |
-| **Inspect on-device AI** | Choose from installed models and show detections, keypoints, segmentation masks, and CLIP regions as supported by the camera. |
-| **Search by description** | Browse the camera’s vocabulary or sync a custom English or Chinese prompt using a matching MobileCLIP text model. |
-| **Capture and review** | Take single, timed, or burst JPEGs. Record clips, browse AI highlight markers, trim, and export to a local folder. |
 
 ## Connect a camera
 
-1. Join the camera’s Wi-Fi network or use a LAN that can reach it.
-2. Enter the camera’s IPv4 address in **Device address**. The SG2002 reference hotspot defaults to `192.168.88.1`.
-3. Select **HTTP · 8554** and click **Connect**. HTTP is the preferred first test and can run alongside the Android client’s UDP preview.
-4. To test **UDP · 8555**, disconnect the Android client’s UDP preview first. The reference firmware has one UDP video destination and one AI subscriber.
+1. Connect your computer to the camera over Ethernet or join the camera’s Wi-Fi network. On macOS, allow local-network access when prompted.
+2. In Studio, open **Find cameras** or enter the camera’s IPv4 address in **Device address**. The SG2002 reference hotspot uses `192.168.88.1` by default.
+3. Select **HTTP · 8554** for the first preview, then click **Connect**. To use **UDP · 8555**, first stop the Android client’s UDP preview. The reference firmware supports one UDP video destination and one AI event subscriber.
 
-On macOS, grant local-network access when prompted. If the address is unknown, choose **Find cameras**. Studio reads `GET_CAPS` and offers the camera's advertised controls in v1.2. Cameras using v1.0 or v1.1 follow the legacy control path.
+Studio discovers v1.2 cameras with `GET_CAPS` broadcasts on directly attached IPv4 networks, including Ethernet link-local networks. You can enter the address manually if broadcast discovery is unavailable. `GET_CAPS` also tells Studio which camera controls and AI features to expose. Earlier devices use the legacy control path.
 
-## Project status
+## Features
 
-| Target | Verification |
+| Feature | Desktop workflow |
 | --- | --- |
-| **macOS · Apple Silicon** | Packaged app verified with the local simulator. Tested 720p30 HTTP and UDP preview, UDP recovery, photo and video capture, AI events, CLIP prompt sync, and highlight trimming. |
-| **Windows · x64 / Ubuntu · x64** | Native build jobs are configured. Video playback in an installed package is pending platform verification. |
-| **KICKPI K12S-C · RV1126B** | Apple Silicon app verified over wired Ethernet. Tested v1.2 link-local discovery, 1440p HTTP and UDP preview, reconnection, advertised controls, and recording without AI. |
-| **SG2002 reference hardware** | Client behavior follows the shared specification and was checked against the reference implementation. Direct hardware verification is pending. |
+| **Viewfinder** | H.264 over HTTP or UDP, automatic reconnect, digital zoom and pan, mirror and flip, grid, histogram, and horizon guide. |
+| **Camera controls** | Bitrate, GOP, white balance, exposure, shutter and ISO limits, and image presets as supported by the camera. |
+| **On-device AI** | Model selection and overlays for detections, keypoints, segmentation, and CLIP regions as supported by the camera. |
+| **Scene search** | Browse the camera’s CLIP vocabulary or sync custom English and Chinese prompts with matching local model assets. |
+| **Capture and review** | Single, timed, and burst JPEG capture, MP4 recording, AI highlight markers, clip trimming, and local export. |
 
-On desktops with no orientation sensor, the horizon overlay shows a level reference line. Dive telemetry reflects the camera’s report. Some v1.0 telemetry and enhancement fields are placeholders in the SG2002 firmware.
+## Verified compatibility
+
+| Target | Coverage |
+| --- | --- |
+| **macOS · Apple Silicon** | Packaged app exercised with the simulator for 720p30 HTTP and UDP preview, UDP recovery, capture, inference events, CLIP prompt sync, and highlight trimming. |
+| **KICKPI K12S-C · RV1126B** | Tested on Apple Silicon over wired Ethernet. Covers v1.2 discovery, 1440p30 HTTP and UDP preview, reconnection, advertised encoder controls, and recording. The tested firmware advertised no AI models. |
+| **SG2002** | Checked against the shared specification and Android reference implementation. Direct Studio-to-SG2002 hardware verification is pending. |
+| **Windows · x64 / Ubuntu · x64** | Native builds run in GitHub Actions. Playback in installed bundles is pending verification. |
 
 ## Build from source
 
-You need Node.js 24, the Rust toolchain pinned in this repository, the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), and FFmpeg. Studio looks beside its executable, in common macOS installation directories, and on `PATH`. Set `RADIAN_FFMPEG` to an absolute path to select a specific binary.
+Install Node.js 24, Rust through `rustup`, [Tauri’s platform prerequisites](https://v2.tauri.app/start/prerequisites/), and FFmpeg. The repository pins the Rust toolchain.
 
 ```sh
 git clone https://github.com/tianrking/radian-studio.git
@@ -56,27 +57,29 @@ npm ci
 npm run tauri -- build --bundles app
 ```
 
-| Platform | Bundle argument |
+| Build on | Bundle argument |
 | --- | --- |
 | macOS | `--bundles app` |
 | Windows | `--bundles nsis` |
 | Ubuntu | `--bundles deb` |
 
-Run the build on the target operating system. The installed WebView must support H.264 through Media Source Extensions. For Linux, verify codec availability separately from the WebKitGTK build dependencies.
+Builds appear under `src-tauri/target/release/bundle/`. For local development, run `npm run tauri -- dev`. The [Desktop workflow](https://github.com/tianrking/radian-studio/actions/workflows/build.yml) publishes CI artifacts for each successful platform build.
+
+Studio checks for FFmpeg beside its executable, in common macOS install locations, and on `PATH`. Set `RADIAN_FFMPEG` to an absolute executable path to override discovery. Playback requires H.264 support through Media Source Extensions in the system WebView. On Linux, codec availability also depends on the distribution’s media packages.
 
 ### Custom scene search
 
-The camera’s built-in CLIP vocabulary is available when its firmware advertises a scene-search model. To encode custom prompts locally, import the matching MobileCLIP and Marian assets from an authorized checkout of the Android reference client **before building**.
+The camera’s built-in vocabulary is available when it advertises a CLIP model. To encode custom prompts locally, import the matching MobileCLIP and Marian assets from an authorized checkout of the Android reference client before building.
 
 ```sh
 node scripts/import-clip.mjs ../radian-android/app/src/main/assets/clip
 ```
 
-The public source tree and CI bundles exclude these model assets. Studio sends custom embeddings only when the camera declares the matching embedding space and a dimension of 512.
+The public source tree and CI bundles exclude these model assets. Studio synchronizes custom embeddings when the camera advertises the matching embedding space and a dimension of 512.
 
 ## Try without a camera
 
-Generate a 720p30 test stream using FFmpeg with libx264, then start the Rust simulator.
+Generate a 720p30 test stream with FFmpeg and libx264, then start the Rust simulator.
 
 ```sh
 ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 -t 3 -an -c:v libx264 \
@@ -87,45 +90,34 @@ ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 -t 3 -an -c:v libx264 \
 cargo run --locked --manifest-path src-tauri/Cargo.toml --bin radian-sim -- sample.ts
 ```
 
-Connect Studio to `127.0.0.1`. To check recovery, stop and restart the simulator while Studio is connected. The test pattern and AI events are synthetic.
+Enter `127.0.0.1` in Studio and click **Connect**. Choose **On-device AI → Full speed** to see synthetic detections. Stop and restart the simulator while Studio is connected to exercise recovery.
 
 <details>
-<summary>Protocol and model regression checks</summary>
-
-Build the frontend first. Point the tests at the official capabilities fixture and a local fragmented MP4 sample. The separate model check uses the Android tokenizer vectors and imported model assets.
+<summary>Run regression checks</summary>
 
 ```sh
 npm run build
 RADIAN_PROTOCOL_FIXTURE=/path/to/radian-protocol/fixtures/sg2002-caps.json \
   RADIAN_FMP4_FIXTURE=/path/to/sample.fmp4 \
   cargo test --locked --manifest-path src-tauri/Cargo.toml
+```
 
+With the matching Android assets imported, run the tokenizer vectors separately.
+
+```sh
 node scripts/test-clip.mjs ../radian-android/app/src/test/resources/clip/tokenizer_vectors.json
 ```
 
 </details>
 
-## Architecture
+## Architecture and protocol
 
-```mermaid
-flowchart LR
-    Camera["Radian camera"]
-    Session["Rust · device session"]
-    Media["FFmpeg · TS to fMP4"]
-    Desktop["React · camera controls and AI overlays"]
-    Player["System WebView · H.264 playback"]
+Tauri hosts the React interface. Rust manages camera discovery, controls, stream sessions, and capture storage. FFmpeg remuxes MPEG-TS to fragmented MP4 without re-encoding H.264. The system WebView decodes preview video, and an ONNX Runtime worker can encode custom scene prompts locally.
 
-    Camera <-->|"UDP 8556 · control and capabilities"| Session
-    Camera -->|"UDP 8557 · AI events"| Session
-    Camera -->|"HTTP 8554 or UDP 8555 · MPEG-TS"| Media
-    Session <--> Desktop
-    Media -->|"H.264 fragments"| Player
-```
+| Channel | Transport |
+| --- | --- |
+| Discovery, controls, and capabilities | UDP to camera port `8556` |
+| Live preview | MPEG-TS at `http://<camera-ip>:8554/live.ts` or over UDP to desktop port `8555` |
+| Inference events | UDP JSON to desktop port `8557` |
 
-The Rust session owns UDP control, stream lifecycle, reconnects, and capture storage. FFmpeg repackages the H.264 stream without re-encoding. The system WebView decodes video and the React interface renders camera controls and AI overlays. Custom scene search runs locally in an ONNX Runtime worker.
-
-## Radian ecosystem
-
-[Radian Protocol](https://github.com/tianrking/radian-protocol) defines the shared wire contract. [SG2002 firmware](https://github.com/tianrking/radian-fw-sg2002) and [OpenRadian for Android](https://github.com/tianrking/radian-android) are the reference implementations. Access to the reference repositories may require GitHub permissions.
-
-This integration was checked against protocol commit `27e26f3` and Android commit `a67001b`.
+The desktop client follows the shared [Radian Device Protocol](https://github.com/tianrking/radian-protocol). The v1.2 integration was checked against protocol revision [`27e26f3`](https://github.com/tianrking/radian-protocol/tree/27e26f392ffd26627ac672d377aae107c27d487f). The reference implementations are [Radian SG2002 firmware](https://github.com/tianrking/radian-fw-sg2002) and [OpenRadian for Android](https://github.com/tianrking/radian-android).

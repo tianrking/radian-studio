@@ -1,38 +1,54 @@
 <div align="center">
+  <img src="src-tauri/icons/icon.png" width="96" height="96" alt="Radian Studio 图标" />
 
-<img src="src-tauri/icons/icon.png" width="96" alt="Radian Studio 图标" />
+  <h1>Radian Studio</h1>
 
-# Radian Studio
+  <p><strong>Radian 相机的桌面取景和控制工作台</strong></p>
+  <p>通过局域网直连相机，一边看实时画面，一边调参、拍照和录像。</p>
 
-**Radian 相机的桌面取景和控制工作台**
+  <a href="https://github.com/tianrking/radian-studio/actions/workflows/build.yml"><img src="https://github.com/tianrking/radian-studio/actions/workflows/build.yml/badge.svg" alt="桌面端构建状态" /></a>
 
-在局域网内直连相机，观看实时画面、调整设备参数、叠加相机端 AI 结果，并拍摄照片和视频。
+  <p>
+    <a href="#连接相机">连接相机</a> ·
+    <a href="#从源码构建">从源码构建</a> ·
+    <a href="#用模拟器试用">用模拟器试用</a> ·
+    <a href="README.md">English</a>
+  </p>
 
-[English](README.md) · [连接相机](#连接相机) · [构建与试用](#构建与试用)
-
+  <img src="docs/studio-preview.webp" width="100%" alt="macOS 上的 Radian Studio，显示模拟器测试画面、AI 检测框、亮度直方图和相机控制" />
+  <p><sub>macOS 应用实拍，视频和 AI 事件来自内置模拟器。</sub></p>
 </div>
-
-## 功能
-
-| 功能 | 桌面端实现 |
-| --- | --- |
-| 连接与取景 | 手动填写 IPv4、扫描局域网、读取 `GET_CAPS`、HTTP 与 UDP 预览、自动重连、网格、直方图和数字变焦 |
-| 相机控制 | 码率、GOP、白平衡、曝光、快门和 ISO 上限、场景预设和图像增强 |
-| AI 与场景搜索 | 按设备能力选择模型，叠加检测框、关键点、分割和 CLIP 区域。导入匹配模型后可运行中英文自定义搜索。 |
-| 拍摄与图库 | 单张、定时、连拍、录像、AI 高光标记、片段裁剪和文件导出 |
 
 ## 连接相机
 
-1. 让电脑加入相机热点，或连接能访问相机的局域网。
-2. 在 **Device address** 填写相机 IP。SG2002 参考固件的热点默认地址是 `192.168.88.1`。
-3. 先选 **HTTP · 8554**，点击 **Connect**。它可以与 Android 的 UDP 预览同时使用。
-4. 若要测试 **UDP · 8555**，先断开 Android 的 UDP 预览。参考固件只保留一个 UDP 视频目的端和一个 AI 订阅端。
+1. 用网线连接相机，或让电脑加入相机热点。macOS 提示时允许应用访问局域网。
+2. 点击 **Find cameras**，也可在 **Device address** 手动填写相机 IPv4 地址。SG2002 参考固件的热点默认地址是 `192.168.88.1`。
+3. 第一次预览选择 **HTTP · 8554**，再点 **Connect**。如果要使用 **UDP · 8555**，先关闭 Android 上的 UDP 预览。参考固件同一时间支持一个 UDP 视频接收端和一个 AI 事件订阅端。
 
-macOS 弹出局域网权限提示时，请允许应用访问。地址未知时可点 **Find cameras**，Studio 按活动 IPv4 接口的掩码发送定向广播。广播未发现相机时，Studio 会对已填写地址所在的 `/24` 进行单播补查。v1.2 设备的控制按钮由 `GET_CAPS` 声明的能力决定。
+Studio 可在直连的 IPv4 网段按接口掩码广播 `GET_CAPS`，支持有线链路本地地址。广播不可用时可直接填写 IP。界面根据 v1.2 的能力声明显示相机控制和 AI 功能，早期设备兼容旧版控制流程。
 
-## 构建与试用
+## 功能
 
-安装 Node.js 24、仓库固定的 Rust 工具链、FFmpeg 和 [Tauri 平台依赖](https://v2.tauri.app/start/prerequisites/)，再执行以下命令。
+| 功能 | 桌面端支持 |
+| --- | --- |
+| **实时取景** | H.264 HTTP / UDP 预览、自动重连、数字变焦和平移、镜像翻转、网格、直方图及水平参考线。 |
+| **相机控制** | 按设备能力调节码率、GOP、白平衡、曝光、快门、ISO 上限和图像预设。 |
+| **设备端 AI** | 选择相机模型，叠加检测框、关键点、分割结果和 CLIP 区域。 |
+| **场景搜索** | 使用相机自带的 CLIP 词表。导入匹配的本地模型后，可同步中英文自定义搜索词。 |
+| **拍摄与回看** | 单张、定时及连拍 JPEG、MP4 录像、AI 高光标记、片段裁剪和本地导出。 |
+
+## 实测范围
+
+| 平台或设备 | 已验证项目 |
+| --- | --- |
+| **macOS · Apple Silicon** | 打包应用配合模拟器验证了 720p30 HTTP / UDP 预览、UDP 恢复、拍摄、AI 事件、CLIP 词同步和高光裁剪。 |
+| **KICKPI K12S-C · RV1126B** | Mac 有线真机验证了 v1.2 发现、1440p30 HTTP / UDP 预览、重连、设备声明的编码控制及录像。该固件未声明 AI 模型。 |
+| **SG2002** | 已对照统一协议及 Android 参考实现检查。Studio 直连 SG2002 真机仍待验证。 |
+| **Windows · x64 / Ubuntu · x64** | 已配置 GitHub Actions 原生构建，安装包的实际播放仍待验证。 |
+
+## 从源码构建
+
+安装 Node.js 24、`rustup`、[Tauri 平台依赖](https://v2.tauri.app/start/prerequisites/) 和 FFmpeg。Rust 版本由仓库固定。
 
 ```sh
 git clone https://github.com/tianrking/radian-studio.git
@@ -41,8 +57,14 @@ npm ci
 npm run tauri -- build --bundles app
 ```
 
-在对应平台上构建，Windows 使用 `--bundles nsis`，Ubuntu 使用 `--bundles deb`。无真机时可用 [Rust 模拟设备](README.md#try-without-a-camera)，并在 Studio 里连接 `127.0.0.1`。需要中英文自定义场景搜索时，请按[模型导入说明](README.md#custom-scene-search)准备授权的 Android 模型资产。
+以上命令在 macOS 生成 `.app`。Windows 使用 `--bundles nsis`，Ubuntu 使用 `--bundles deb`。产物位于 `src-tauri/target/release/bundle/`。本地开发可运行 `npm run tauri -- dev`。[桌面构建记录](https://github.com/tianrking/radian-studio/actions/workflows/build.yml)
 
-**当前验证范围**包括 Apple Silicon 上的打包应用、本地模拟器和 RV1126B 有线真机。模拟器覆盖 720p30 预览、UDP 掉线恢复、AI 事件、CLIP 词同步和高光裁剪。RV1126B 覆盖 v1.2 广播发现、1440p HTTP/UDP 预览、重连、已声明的设备控制及无 AI 时的录像。SG2002 真机及 Windows、Linux 安装后的实际播放待验收。
+Studio 会在可执行文件旁、macOS 常用安装目录和 `PATH` 中查找 FFmpeg，也可通过 `RADIAN_FFMPEG` 指定绝对路径。预览依赖系统 WebView 的 H.264 Media Source Extensions 支持。自定义场景搜索需要另行导入获授权的匹配模型。[模型导入说明](README.md#custom-scene-search)
 
-桌面端沿用 [统一 Radian 协议](https://github.com/tianrking/radian-protocol)。[SG2002 固件](https://github.com/tianrking/radian-fw-sg2002)和 [Android 客户端](https://github.com/tianrking/radian-android)用于参考，访问这些仓库可能需要 GitHub 权限。
+## 用模拟器试用
+
+按[模拟器步骤](README.md#try-without-a-camera)生成测试视频并启动 Rust 模拟器。在 Studio 中连接 `127.0.0.1`。要查看合成检测框，可在 **On-device AI** 选择 **Full speed**。
+
+## 架构与协议
+
+桌面端使用 Tauri、React 和 Rust。Rust 管理发现、控制、媒体会话与文件保存。FFmpeg 直接把 MPEG-TS 中的 H.264 转封装为 fMP4，由系统 WebView 解码。设备通讯遵循 [Radian Device Protocol](https://github.com/tianrking/radian-protocol)，v1.2 联调使用 [`27e26f3`](https://github.com/tianrking/radian-protocol/tree/27e26f392ffd26627ac672d377aae107c27d487f)。[SG2002 固件](https://github.com/tianrking/radian-fw-sg2002)和 [OpenRadian Android](https://github.com/tianrking/radian-android)是参考实现。

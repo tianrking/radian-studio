@@ -1,0 +1,43 @@
+name: Desktop
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            bundle: app
+          - os: windows-2025
+            bundle: nsis
+          - os: ubuntu-24.04
+            bundle: deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Linux desktop development packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build frontend and run Rust tests
+        run: |
+          npm run build
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Build desktop bundle
+        run: npm run tauri -- build --bundles ${{ matrix.bundle }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: radian-studio-${{ runner.os }}
+          path: src-tauri/target/release/bundle/

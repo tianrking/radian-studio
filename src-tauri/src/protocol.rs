@@ -1,12 +1,17 @@
-use futures_util::{StreamExt, stream};
+use futures_util::{StreamExt, future, stream};
+use if_addrs::{IfAddr, Ifv4Addr};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::HashSet,
-    net::{Ipv4Addr, SocketAddrV4},
+    collections::{BTreeMap, HashSet},
+    io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     time::Duration,
 };
-use tokio::{net::UdpSocket, time::timeout};
+use tokio::{
+    net::UdpSocket,
+    time::{Instant, timeout, timeout_at},
+};
 
 pub const HTTP_PORT: u16 = 8554;
 pub const VIDEO_PORT: u16 = 8555;
@@ -62,6 +67,16 @@ pub struct Caps {
     pub device: Device,
     pub preview: Option<Preview>,
     pub ai: Ai,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controls: Option<Vec<String>>,
+}
+
+impl Caps {
+    fn supports(&self, control: &str) -> bool {
+        self.controls
+            .as_ref()
+            .is_none_or(|controls| controls.iter().any(|name| name == control))
+    }
 }
 
 fn model_id(s: &str) -> bool {
@@ -71,7 +86,7 @@ fn model_id(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
-fn task_name(s: &str) -> bool {
+fn wire_name(s: &str) -> bool {
     (1..=64).contains(&s.len())
         && s.as_bytes()[0].is_ascii_lowercase()
         && s.bytes()
@@ -89,6 +104,21 @@ pub fn decode_caps(text: &str) -> Result<Caps, String> {
             "Unsupported protocol {}.{}",
             caps.protocol.major, caps.protocol.minor
         ));
+    }
+    match &caps.controls {
+        Some(controls) => {
+            let mut defined = HashSet::new();
+            if controls
+                .iter()
+                .any(|name| !wire_name(name) || !defined.insert(name))
+            {
+                return Err("Invalid GET_CAPS JSON: invalid or duplicate control name".into());
+            }
+        }
+        None if caps.protocol.minor >= 2 => {
+            return Err("Invalid GET_CAPS JSON: protocol v1.2 requires a controls array".into());
+        }
+        None => (),
     }
     if [
         &caps.device.board,
@@ -111,7 +141,7 @@ pub fn decode_caps(text: &str) -> Result<Caps, String> {
     let mut models = HashSet::new();
     for model in &caps.ai.models {
         if !model_id(&model.id)
-            || !task_name(&model.task)
+            || !wire_name(&model.task)
             || !models.insert(&model.id)
             || model
                 .label
@@ -148,27 +178,43 @@ pub async fn request(
     socket
         .connect(SocketAddrV4::new(host, CONTROL_PORT))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| control_network_error(command, e))?;
     let mut buffer = vec![0; 65507];
     for _ in 0..attempts {
         socket
             .send(command.as_bytes())
             .await
-            .map_err(|e| format!("{command}: {e}"))?;
+            .map_err(|e| control_network_error(command, e))?;
         match timeout(Duration::from_millis(wait_ms), socket.recv(&mut buffer)).await {
             Ok(Ok(n)) => {
-                let raw =
-                    std::str::from_utf8(&buffer[..n]).map_err(|_| "Device sent invalid UTF-8")?;
-                return raw
-                    .strip_suffix('\n')
-                    .map(|s| s.trim_end_matches('\r').to_owned())
-                    .ok_or_else(|| "Device reply has no LF terminator".to_owned());
+                return wire_reply(&buffer[..n]).map(str::to_owned);
             }
-            Ok(Err(e)) => return Err(format!("{command}: {e}")),
+            Ok(Err(e)) => return Err(control_network_error(command, e)),
             Err(_) => (),
         }
     }
     Err(format!("{command} timed out at {host}:{CONTROL_PORT}"))
+}
+
+fn wire_reply(bytes: &[u8]) -> Result<&str, String> {
+    let raw = std::str::from_utf8(bytes).map_err(|_| "Device sent invalid UTF-8")?;
+    raw.strip_suffix('\n')
+        .map(|text| text.trim_end_matches('\r'))
+        .ok_or_else(|| "Device reply has no LF terminator".to_owned())
+}
+
+fn control_network_error(command: &str, error: io::Error) -> String {
+    if cfg!(target_os = "macos")
+        && matches!(
+            error.kind(),
+            io::ErrorKind::PermissionDenied | io::ErrorKind::BrokenPipe
+        )
+    {
+        return format!(
+            "{command}: {error}. Check Local Network access for Radian Studio in System Settings."
+        );
+    }
+    format!("{command}: {error}")
 }
 
 pub async fn capabilities(host: Ipv4Addr, wait_ms: u64, attempts: u8) -> Result<Caps, String> {
@@ -222,6 +268,7 @@ pub async fn capabilities(host: Ipv4Addr, wait_ms: u64, attempts: u8) -> Result<
             models,
             clip_user: None,
         },
+        controls: None,
     })
 }
 
@@ -236,7 +283,70 @@ pub fn parse_host(host: &str) -> Result<Ipv4Addr, String> {
     Ok(host)
 }
 
-pub async fn scan(address: Ipv4Addr) -> Vec<(Ipv4Addr, Caps)> {
+pub async fn discover(fallback: Option<Ipv4Addr>) -> Vec<(Ipv4Addr, Caps)> {
+    let interfaces = if_addrs::get_if_addrs().unwrap_or_default();
+    let mut addresses = HashSet::new();
+    let networks = interfaces.into_iter().filter_map(|interface| {
+        if !interface.is_oper_up() || interface.is_loopback() || interface.is_p2p() {
+            return None;
+        }
+        let IfAddr::V4(network) = interface.addr else {
+            return None;
+        };
+        ((1..=30).contains(&network.prefixlen)
+            && !network.ip.is_unspecified()
+            && addresses.insert((network.ip, network.netmask)))
+        .then_some(network)
+    });
+    let broadcast_replies = future::join_all(networks.map(broadcast_caps)).await;
+    let found = broadcast_replies
+        .into_iter()
+        .flatten()
+        .collect::<BTreeMap<_, _>>();
+    if let Some(address) = fallback
+        && found.is_empty()
+    {
+        return scan_subnet(address).await;
+    }
+    found.into_iter().collect()
+}
+
+async fn broadcast_caps(network: Ifv4Addr) -> Vec<(Ipv4Addr, Caps)> {
+    let Ok(socket) = UdpSocket::bind((network.ip, 0)).await else {
+        return Vec::new();
+    };
+    let broadcast = directed_broadcast(network.ip, network.netmask);
+    if socket.set_broadcast(true).is_err()
+        || socket
+            .send_to(b"GET_CAPS", (broadcast, CONTROL_PORT))
+            .await
+            .is_err()
+    {
+        return Vec::new();
+    }
+    let deadline = Instant::now() + Duration::from_millis(650);
+    let mask = u32::from(network.netmask);
+    let network_id = u32::from(network.ip) & mask;
+    let mut bytes = vec![0; 65507];
+    let mut found = BTreeMap::new();
+    while let Ok(Ok((size, SocketAddr::V4(source)))) =
+        timeout_at(deadline, socket.recv_from(&mut bytes)).await
+    {
+        if source.port() != CONTROL_PORT || u32::from(*source.ip()) & mask != network_id {
+            continue;
+        }
+        if let Ok(caps) = wire_reply(&bytes[..size]).and_then(decode_caps) {
+            found.insert(*source.ip(), caps);
+        }
+    }
+    found.into_iter().collect()
+}
+
+fn directed_broadcast(address: Ipv4Addr, mask: Ipv4Addr) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(address) | !u32::from(mask))
+}
+
+async fn scan_subnet(address: Ipv4Addr) -> Vec<(Ipv4Addr, Caps)> {
     let [a, b, c, _] = address.octets();
     let mut devices = stream::iter(1..=254)
         .map(|last| async move {
@@ -260,29 +370,36 @@ pub fn command_allowed(cmd: &str, caps: &Caps) -> bool {
     }
     let parts: Vec<_> = cmd.split_ascii_whitespace().collect();
     match parts.as_slice() {
-        ["STATUS" | "GET_CONFIG" | "HIGHLIGHTS" | "HIGHLIGHT_CLEAR" | "TELEM" | "IDR"] => true,
-        ["BITRATE", n] => integer_range(n, 200, 10000),
-        ["GOP", n] => integer_range(n, 5, 120),
-        ["MODE", "stream" | "ai" | "eco"] => true,
-        ["ISP", "PRESET", "normal" | "aqua" | "dehaze" | "night"] => true,
+        ["STATUS" | "GET_CONFIG"] | ["AI", "LIST"] => true,
+        ["HIGHLIGHTS" | "HIGHLIGHT_CLEAR"] => caps.supports("highlights"),
+        ["TELEM"] => caps.supports("telemetry"),
+        ["IDR"] => caps.supports("idr"),
+        ["BITRATE", n] => caps.supports("bitrate") && integer_range(n, 200, 10000),
+        ["GOP", n] => caps.supports("gop") && integer_range(n, 5, 120),
+        ["MODE", "stream" | "ai" | "eco"] | ["AI", "ON" | "OFF"] => !caps.ai.models.is_empty(),
+        ["ISP", "PRESET", "normal" | "aqua" | "dehaze" | "night"] => caps.supports("isp_preset"),
         ["ISP", wb, ev, shutter, iso] => {
-            integer_range(wb, 0, 12000)
+            caps.supports("isp")
+                && integer_range(wb, 0, 12000)
                 && (*wb == "0" || integer_range(wb, 1500, 12000))
                 && integer_range(ev, -30, 30)
                 && integer_range(shutter, 0, 1_000_000)
                 && integer_range(iso, 0, 102400)
         }
         ["ENHANCE", flags @ ..] => {
-            flags.len() == 5 && flags.iter().all(|flag| matches!(*flag, "0" | "1"))
+            caps.supports("enhance")
+                && flags.len() == 5
+                && flags.iter().all(|flag| matches!(*flag, "0" | "1"))
         }
-        ["PRESET", name] => model_id(name),
-        ["AI", "ON" | "OFF" | "LIST"] => true,
+        ["PRESET", name] => caps.supports("scene_preset") && model_id(name),
         ["AI", "MODEL", id] => caps.ai.models.iter().any(|model| model.id == *id),
         ["AI", "THRESH", conf, nms] => {
-            float_range(conf, 0.05, 0.95) && float_range(nms, 0.10, 0.95)
+            !caps.ai.models.is_empty()
+                && float_range(conf, 0.05, 0.95)
+                && float_range(nms, 0.10, 0.95)
         }
-        ["AI", "THRESH", conf] => float_range(conf, 0.05, 0.95),
-        ["AI", "INTERVAL", ms] => integer_range(ms, 0, 5000),
+        ["AI", "THRESH", conf] => !caps.ai.models.is_empty() && float_range(conf, 0.05, 0.95),
+        ["AI", "INTERVAL", ms] => !caps.ai.models.is_empty() && integer_range(ms, 0, 5000),
         ["CLIP", "INFO" | "LIST" | "RELOAD"] => has_clip(caps),
         ["CLIP", "FILTER", filter @ ..] => {
             has_clip(caps) && filter.iter().all(|word| model_id(word))
@@ -357,12 +474,60 @@ mod tests {
 
     #[test]
     fn preserves_minor_extensions_and_checks_semantics() {
-        let fixture = r#"{"protocol":{"major":1,"minor":5},"device":{"board":"fixture","soc":"sim","sensor":"bars"},"preview":{"width":1280,"height":720,"fps":30,"codec":"h264","transports":["http-ts","future"]},"ai":{"models":[{"id":"custom","task":"future_task"}]},"unknown":"ignored"}"#;
+        let fixture = r#"{"protocol":{"major":1,"minor":5},"device":{"board":"fixture","soc":"sim","sensor":"bars"},"preview":{"width":1280,"height":720,"fps":30,"codec":"h264","transports":["http-ts","future"]},"ai":{"models":[{"id":"custom","task":"future_task"}]},"controls":["idr","future_control"],"unknown":"ignored"}"#;
         let caps = decode_caps(fixture).unwrap();
         assert!(command_allowed("AI MODEL custom", &caps));
         assert!(!command_allowed("AI MODEL unknown", &caps));
         assert!(!command_allowed("IDR\nSTOP", &caps));
         assert!(decode_caps(&fixture.replace("\"major\":1", "\"major\":2")).is_err());
         assert!(decode_caps(&fixture.replace("\"fps\":30", "\"fps\":0")).is_err());
+    }
+
+    #[test]
+    fn advertised_controls_gate_commands_and_empty_inventory_gates_ai() {
+        let baseline = r#"{"protocol":{"major":1,"minor":1},"device":{"board":"fixture","soc":"sim","sensor":"bars"},"preview":{"width":2560,"height":1440,"fps":30,"codec":"h264","transports":["http-ts"]},"ai":{"models":[]}}"#;
+        let old = decode_caps(baseline).unwrap();
+        assert!(command_allowed("TELEM", &old));
+        let missing = baseline.replace("\"minor\":1", "\"minor\":2");
+        assert!(decode_caps(&missing).is_err());
+        let updated = format!(
+            r#"{},"controls":["bitrate","gop","idr","future_control"]}}"#,
+            missing.strip_suffix('}').unwrap()
+        );
+        let new = decode_caps(&updated).unwrap();
+        for command in ["STATUS", "AI LIST", "IDR", "BITRATE 7000", "GOP 30"] {
+            assert!(command_allowed(command, &new), "{command}");
+        }
+        for command in [
+            "TELEM",
+            "HIGHLIGHTS",
+            "ISP 0 0 0 0",
+            "ISP PRESET aqua",
+            "PRESET WIDE",
+            "ENHANCE 1 0 0 0 0",
+            "AI ON",
+            "MODE eco",
+        ] {
+            assert!(!command_allowed(command, &new), "{command}");
+        }
+        let empty =
+            decode_caps(&updated.replace(r#"["bitrate","gop","idr","future_control"]"#, "[]"))
+                .unwrap();
+        assert!(!command_allowed("IDR", &empty));
+        assert!(decode_caps(&updated.replace("future_control", "gop")).is_err());
+        assert!(decode_caps(&updated.replace("future_control", "Bad control")).is_err());
+    }
+
+    #[test]
+    fn broadcast_obeys_interface_prefix() {
+        let address = Ipv4Addr::new(169, 254, 38, 42);
+        assert_eq!(
+            directed_broadcast(address, Ipv4Addr::new(255, 255, 0, 0)),
+            Ipv4Addr::new(169, 254, 255, 255)
+        );
+        assert_eq!(
+            directed_broadcast(address, Ipv4Addr::new(255, 255, 255, 0)),
+            Ipv4Addr::new(169, 254, 38, 255)
+        );
     }
 }

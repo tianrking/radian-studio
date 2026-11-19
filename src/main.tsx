@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Activity, Aperture, Camera, Circle, Focus, Grid3X3, Image, Lock, Maximize, Radio, RotateCcw, Scan, SlidersHorizontal, Square, Wifi, X } from 'lucide-react';
-import { errorText, native, type Device, type Transport } from './api';
+import { errorText, native, supportsControl, type Device, type Transport } from './api';
 import { Controls } from './Controls';
 import { Gallery } from './Gallery';
 import { FrameSurface, Histogram, Overlays } from './Overlays';
@@ -18,6 +18,7 @@ function App() {
   const [transport,setTransport] = useState<Transport>('http-ts');
   const [section,setSection] = useState<'settings' | 'search'>('settings');
   const [model,setModel] = useState('');
+  const [encoder,setEncoder] = useState<{ session: number; bitrate?: number; gop?: number }>();
   const [discovered,setDiscovered] = useState<Device[]>();
   const [scanning,setScanning] = useState(false);
   const [gallery,setGallery] = useState(false);
@@ -46,6 +47,9 @@ function App() {
   const drag = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const live = camera.status.phase === 'live';
   const connected = camera.session !== null;
+  const hasAi = !!camera.caps?.ai.models.length;
+  const hasSceneSearch = camera.caps?.ai.models.some((item) => item.task === 'open_vocab_search') ?? false;
+  const hasTelemetry = supportsControl(camera.caps, 'telemetry');
   const streaming = camera.status.phase === "retrying" || connected;
   const busy = camera.status.phase === 'probing';
   const hasSession = streaming || busy;
@@ -65,7 +69,7 @@ function App() {
     return () => observer.disconnect();
   }, []);
   useEffect(() => {
-    if (!hud || camera.session === null) return;
+    if (!hud || !hasTelemetry || camera.session === null) return;
     const current = camera.session;
     let alive = true;
     function poll() {
@@ -78,7 +82,7 @@ function App() {
     poll();
     const id = window.setInterval(poll, 2200);
     return () => { alive = false; window.clearInterval(id); };
-  }, [hud, camera.session]);
+  }, [hud, hasTelemetry, camera.session]);
   useEffect(() => {
     if (!level) return;
     const update = (e: DeviceOrientationEvent) => { if (e.gamma !== null) setOrientation(e.gamma); };
@@ -101,9 +105,12 @@ function App() {
 
   useEffect(() => {
     if (camera.session === null) return;
+    const session = camera.session;
     let alive = true;
-    void native.run<{ model?: string }>(camera.session, 'STATUS').then((value) => {
-      if (alive && typeof value.model === 'string') setModel(value.model);
+    void native.run<{ model?: string; bitrate?: number; gop?: number }>(session, 'STATUS').then((value) => {
+      if (!alive) return;
+      if (typeof value.model === 'string') setModel(value.model);
+      setEncoder({ session, bitrate: value.bitrate, gop: value.gop });
     }, () => {});
     return () => { alive = false; };
   }, [camera.session]);
@@ -209,7 +216,7 @@ function App() {
             <div className="compare-tint"/><div className="compare-divider"/><span>Original</span><span>Aqua color</span>
             <input type="range" min="10" max="90" value={split} onChange={(e) => setSplit(Number(e.target.value))} aria-label="Aqua comparison split"/>
           </div> : null}
-          {live && hud && telemetry ? <div className="dive-hud"><b>{telemetry.depth} m</b><span>{telemetry.temp} °C</span><span>Max {telemetry.max} m</span><span>{telemetry.duration} s</span></div> : null}
+          {live && hud && hasTelemetry && telemetry ? <div className="dive-hud"><b>{telemetry.depth} m</b><span>{telemetry.temp} °C</span><span>Max {telemetry.max} m</span><span>{telemetry.duration} s</span></div> : null}
           {live && level ? <div className="level-mark" style={{ rotate: `${orientation ?? 0}deg` }} title={orientation === undefined ? "Framing guide · hardware tilt unavailable" : "Device orientation"}/> : null}
           {camera.recording ? <span className="record-tag"><i/> {String(Math.floor(recordSeconds/60)).padStart(2,'0')}:{String(recordSeconds%60).padStart(2,'0')}</span> : null}
           {locked ? <button className="unlock" onClick={() => setLocked(false)}><Lock size={16}/> Unlock controls</button> : null}
@@ -256,29 +263,29 @@ function App() {
             </div>
           </form>
           <div className="pair">
-            <button disabled={scanning || !host.trim()} onClick={() => void scan()}><Scan size={15}/> {scanning ? 'Scanning…' : 'Scan subnet'}</button>
+            <button disabled={scanning} onClick={() => void scan()}><Scan size={15}/> {scanning ? 'Scanning…' : 'Find cameras'}</button>
             <button onClick={() => void task(native.network)}><Wifi size={15}/> Wi-Fi settings</button>
           </div>
           {discovered ? <div className="scan-results">{discovered.length ? discovered.map((device) =>
             <button key={device.host} onClick={() => connect(device.host)}>{device.caps.device.board}<span className="mono">{device.host}</span></button>)
-            : <p className="muted">No Radian devices found in this /24 subnet.</p>}</div> : null}
+            : <p className="muted">No Radian cameras found on the local network.</p>}</div> : null}
           {camera.caps ? <div className="device-facts"><span>{camera.caps.device.soc} / {camera.caps.device.sensor}</span>
             <span>Protocol {camera.caps.protocol.major}.{camera.caps.protocol.minor}</span></div> : null}
         </section>
         <div className="tabs" aria-label="Camera panels">
           <button aria-pressed={section === 'settings'} className={section === 'settings' ? 'active' : ''} onClick={() => setSection('settings')}><SlidersHorizontal size={16}/> Controls</button>
-          <button aria-pressed={section === 'search'} className={section === 'search' ? 'active' : ''} onClick={() => setSection('search')}><Focus size={16}/> Scene search</button>
+          {hasSceneSearch ? <button aria-pressed={section === 'search'} className={section === 'search' ? 'active' : ''} onClick={() => setSection('search')}><Focus size={16}/> Scene search</button> : null}
         </div>
-        {section === 'settings' ? <>
+        {section === 'settings' || !hasSceneSearch ? <>
           <section className="panel-content stack preview-settings">
             <div className="section-title"><Focus size={17}/><h2>Framing & overlays</h2></div>
             <div className="check-grid">
-              <label className="switch"><input type="checkbox" checked={boxes} onChange={(e) => setBoxes(e.target.checked)}/> Detection boxes</label>
-              <label className="switch"><input type="checkbox" checked={regions} onChange={(e) => setRegions(e.target.checked)}/> AI regions</label>
+              {hasAi ? <label className="switch"><input type="checkbox" checked={boxes} onChange={(e) => setBoxes(e.target.checked)}/> Detection boxes</label> : null}
+              {hasAi ? <label className="switch"><input type="checkbox" checked={regions} onChange={(e) => setRegions(e.target.checked)}/> AI regions</label> : null}
               <label className="switch"><input type="checkbox" checked={flipX} onChange={(e) => setFlipX(e.target.checked)}/> Mirror</label>
               <label className="switch"><input type="checkbox" checked={flipY} onChange={(e) => setFlipY(e.target.checked)}/> Flip vertical</label>
               <label className="switch"><input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)}/> Aqua comparison</label>
-              <label className="switch"><input type="checkbox" checked={hud} onChange={(e) => setHud(e.target.checked)}/> Dive telemetry</label>
+              {hasTelemetry ? <label className="switch"><input type="checkbox" checked={hud} onChange={(e) => setHud(e.target.checked)}/> Dive telemetry</label> : null}
               <label className="switch"><input type="checkbox" checked={level} onChange={(e) => setLevel(e.target.checked)}/> Horizon guide</label>
               <button disabled={!live} onClick={() => setLocked(true)}><Lock size={13}/> Lock controls</button>
             </div>
@@ -286,7 +293,7 @@ function App() {
               <input type="range" min="1" max="5" step="0.1" value={zoom} onChange={(e) => { setZoom(Number(e.target.value)); setPan({ x:0, y:0 }); }}/>
             </label>
           </section>
-          <Controls key={camera.session ?? 'offline'} caps={connected ? camera.caps : undefined} frame={camera.frame} send={send} model={model} select={selectModel} onError={error}/>
+          <Controls key={camera.session ?? 'offline'} caps={connected ? camera.caps : undefined} frame={camera.frame} send={send} model={model} select={selectModel} onError={error} encoder={encoder?.session === camera.session ? encoder : undefined}/>
         </> : camera.caps && camera.session !== null ? <SceneSearch key={camera.session} host={camera.status.target?.host ?? host} session={camera.session} caps={camera.caps} selectModel={selectModel} showError={setMessage}/> :
           <p className="panel-content muted">Connect a camera to see its scene-search capabilities.</p>}
       </aside>

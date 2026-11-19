@@ -210,8 +210,7 @@ struct FoundDevice {
 
 #[tauri::command]
 async fn discover(host: String) -> Result<Vec<FoundDevice>, String> {
-    let host = parse_host(&host)?;
-    Ok(protocol::scan(host)
+    Ok(protocol::discover(parse_host(&host).ok())
         .await
         .into_iter()
         .map(|(ip, caps)| FoundDevice {
@@ -222,7 +221,7 @@ async fn discover(host: String) -> Result<Vec<FoundDevice>, String> {
 }
 
 async fn subscribe(app: &AppHandle, connection: &mut Connection) -> Result<(), String> {
-    if connection.ai.is_some() {
+    if connection.ai.is_some() || connection.caps.ai.models.is_empty() {
         return Ok(());
     }
     let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, AI_PORT))

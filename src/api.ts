@@ -1,12 +1,18 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export type Transport = 'http-ts' | 'udp-ts';
+export type ControlName = 'bitrate' | 'gop' | 'idr' | 'isp' | 'isp_preset' | 'scene_preset' | 'enhance' | 'highlights' | 'telemetry';
 export type Caps = {
   protocol: { major: number; minor: number };
   device: { board: string; soc: string; sensor: string };
   preview?: { width: number; height: number; fps: number; codec: string; transports: string[] } | null;
   ai: { models: { id: string; task: string; label?: string }[]; clip_user?: { model_id: string; embedding_space: string; dimensions: number } };
+  controls?: string[];
 };
+
+export function supportsControl(caps: Caps | undefined, control: ControlName): boolean {
+  return !!caps && (caps.controls?.includes(control) ?? true);
+}
 export type Detection = {
   cls: number; label: string; score: number; x1: number; y1: number; x2: number; y2: number;
   kps?: [number, number, number][]; sim?: number; map?: string;

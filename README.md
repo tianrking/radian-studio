@@ -18,7 +18,7 @@ Connect directly over your local network, monitor an H.264 feed, adjust camera s
 
 | Capability | Desktop workflow |
 | --- | --- |
-| **Connect** | Enter an IPv4 address or discover cameras on a local /24 subnet. Read device capabilities with `GET_CAPS` or use the confirmed v1.0 compatibility path. |
+| **Connect** | Enter an IPv4 address or discover cameras by broadcast on the Mac or PC's active IPv4 subnets, including Ethernet link-local networks. Studio falls back to a /24 unicast scan around an entered address if broadcast finds no camera. |
 | **Frame a shot** | Preview over HTTP or UDP with automatic reconnect, zoom and pan, flips, a framing grid, a luminance histogram, and an optional horizon guide. |
 | **Tune the camera** | Adjust bitrate, GOP, white balance, exposure, shutter and ISO limits, image enhancements, and scene presets. |
 | **Inspect on-device AI** | Choose from installed models and show detections, keypoints, segmentation masks, and CLIP regions as supported by the camera. |
@@ -32,7 +32,7 @@ Connect directly over your local network, monitor an H.264 feed, adjust camera s
 3. Select **HTTP · 8554** and click **Connect**. HTTP is the preferred first test and can run alongside the Android client’s UDP preview.
 4. To test **UDP · 8555**, disconnect the Android client’s UDP preview first. The reference firmware has one UDP video destination and one AI subscriber.
 
-On macOS, grant local-network access when prompted. If the camera’s address is unknown, enter an address within its subnet and choose **Scan subnet**.
+On macOS, grant local-network access when prompted. If the address is unknown, choose **Find cameras**. Studio reads `GET_CAPS` and offers the camera's advertised controls in v1.2. Cameras using v1.0 or v1.1 follow the legacy control path.
 
 ## Project status
 
@@ -40,6 +40,7 @@ On macOS, grant local-network access when prompted. If the camera’s address is
 | --- | --- |
 | **macOS · Apple Silicon** | Packaged app verified with the local simulator. Tested 720p30 HTTP and UDP preview, UDP recovery, photo and video capture, AI events, CLIP prompt sync, and highlight trimming. |
 | **Windows · x64 / Ubuntu · x64** | Native build jobs are configured. Video playback in an installed package is pending platform verification. |
+| **KICKPI K12S-C · RV1126B** | Apple Silicon app verified over wired Ethernet. Tested v1.2 link-local discovery, 1440p HTTP and UDP preview, reconnection, advertised controls, and recording without AI. |
 | **SG2002 reference hardware** | Client behavior follows the shared specification and was checked against the reference implementation. Direct hardware verification is pending. |
 
 On desktops with no orientation sensor, the horizon overlay shows a level reference line. Dive telemetry reflects the camera’s report. Some v1.0 telemetry and enhancement fields are placeholders in the SG2002 firmware.
@@ -127,4 +128,4 @@ The Rust session owns UDP control, stream lifecycle, reconnects, and capture sto
 
 [Radian Protocol](https://github.com/tianrking/radian-protocol) defines the shared wire contract. [SG2002 firmware](https://github.com/tianrking/radian-fw-sg2002) and [OpenRadian for Android](https://github.com/tianrking/radian-android) are the reference implementations. Access to the reference repositories may require GitHub permissions.
 
-This integration was checked against protocol commit `590af4a` and Android commit `a67001b`.
+This integration was checked against protocol commit `27e26f3` and Android commit `a67001b`.
